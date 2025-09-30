@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360度動画プレイヤー</title>
+    <!-- Tailwind CSSを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.jsを読み込み -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.156.1/build/three.module.js"
+        }
+    }
+    </script>
+    <style>
+        /* ローディングスピナーのスタイル */
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #3498db;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        body {
+            overscroll-behavior: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans overflow-hidden">
+
+    <div id="app-container" class="relative w-full h-screen flex flex-col items-center justify-center">
+        <!-- 動画表示用のキャンバスコンテナ -->
+        <div id="canvas-container" class="absolute top-0 left-0 w-full h-full z-0"></div>
+
+        <!-- コントロールパネル -->
+        <div id="controls" class="relative z-10 bg-black bg-opacity-60 p-6 rounded-xl shadow-lg text-center backdrop-blur-md transition-opacity duration-500 ease-in-out">
+            <h1 class="text-3xl font-bold mb-2">360度動画プレイヤー</h1>
+            <p class="text-gray-300 mb-4 max-w-md">
+                360度動画のURLを入力して再生ボタンを押してください。画面をドラッグすると視点を変更できます。
+            </p>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input type="text" id="video-url" class="flex-grow bg-gray-700 text-white border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="動画URLを入力...">
+                <button id="play-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-300">
+                    再生
+                </button>
+            </div>
+             <p class="text-xs text-gray-500 mt-3">
+                注意: YouTubeのURLは直接利用できません。CORS設定が許可された動画ファイルのURLを指定してください。
+            </p>
+        </div>
+
+        <!-- ローディングインジケーター -->
+        <div id="loading-indicator" class="absolute z-20 hidden items-center justify-center w-full h-full bg-black bg-opacity-70">
+            <div class="loader"></div>
+        </div>
+        
+        <!-- 再生/一時停止ボタン -->
+        <button id="pause-button" class="absolute bottom-5 left-5 z-10 bg-black bg-opacity-50 text-white p-3 rounded-full hidden hover:bg-opacity-75 transition-all">
+            <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M5 3l14 9-14 9V3z"></path></svg>
+            <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class=""><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+        </button>
+
+        <!-- 非表示のvideo要素 -->
+        <video id="video" loop playsinline style="display:none" crossOrigin="anonymous"></video>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- DOM要素の取得 ---
+        const canvasContainer = document.getElementById('canvas-container');
+        const videoUrlInput = document.getElementById('video-url');
+        const playButton = document.getElementById('play-button');
+        const videoElement = document.getElementById('video');
+        const controlsPanel = document.getElementById('controls');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const pauseButton = document.getElementById('pause-button');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+
+        // --- デフォルトの動画URL (修正) ---
+        videoUrlInput.value = 'https://bitmovin-a.akamaihd.net/content/playhouse-vr/mp4s/105560.mp4';
+
+        // --- Three.jsの初期設定 ---
+        let scene, camera, renderer, sphere;
+        let isUserInteracting = false;
+        let onPointerDownPointerX = 0, onPointerDownPointerY = 0;
+        let lon = 0, onPointerDownLon = 0;
+        let lat = 0, onPointerDownLat = 0;
+        let phi = 0, theta = 0;
+
+        function init() {
+            // シーン
+            scene = new THREE.Scene();
+
+            // カメラ
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
+
+            // レンダラー
+            renderer = new THREE.WebGLRenderer();
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            canvasContainer.appendChild(renderer.domElement);
+
+            // 360度映像を投影する球体（スフィア）
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            // 球体の内側にテクスチャを貼るため、スケールを反転させる
+            geometry.scale(-1, 1, 1);
+
+            const texture = new THREE.VideoTexture(videoElement);
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+
+            // --- イベントリスナーの設定 ---
+            window.addEventListener('resize', onWindowResize);
+            canvasContainer.addEventListener('pointerdown', onPointerDown);
+            canvasContainer.addEventListener('pointermove', onPointerMove);
+            canvasContainer.addEventListener('pointerup', onPointerUp);
+            canvasContainer.addEventListener('wheel', onDocumentMouseWheel, { passive: false });
+        }
+
+        // --- イベントハンドラ ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onPointerDown(event) {
+            isUserInteracting = true;
+            onPointerDownPointerX = event.clientX;
+            onPointerDownPointerY = event.clientY;
+            onPointerDownLon = lon;
+            onPointerDownLat = lat;
+        }
+
+        function onPointerMove(event) {
+            if (isUserInteracting) {
+                lon = (onPointerDownPointerX - event.clientX) * 0.1 + onPointerDownLon;
+                lat = (event.clientY - onPointerDownPointerY) * 0.1 + onPointerDownLat;
+            }
+        }
+
+        function onPointerUp() {
+            isUserInteracting = false;
+        }
+        
+        function onDocumentMouseWheel(event) {
+            event.preventDefault();
+            const fov = camera.fov + event.deltaY * 0.05;
+            camera.fov = THREE.MathUtils.clamp(fov, 10, 75);
+            camera.updateProjectionMatrix();
+        }
+
+        // --- アニメーションループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+        }
+
+        // --- 毎フレームの更新処理 ---
+        function update() {
+            // 視点移動の計算
+            lat = Math.max(-85, Math.min(85, lat)); // 縦方向の視点移動に制限
+            phi = THREE.MathUtils.degToRad(90 - lat);
+            theta = THREE.MathUtils.degToRad(lon);
+
+            const x = 500 * Math.sin(phi) * Math.cos(theta);
+            const y = 500 * Math.cos(phi);
+            const z = 500 * Math.sin(phi) * Math.sin(theta);
+
+            camera.lookAt(x, y, z);
+            renderer.render(scene, camera);
+        }
+        
+        // --- 動画再生ロジック ---
+        playButton.addEventListener('click', () => {
+            const videoUrl = videoUrlInput.value.trim();
+            if (videoUrl) {
+                try {
+                    videoElement.src = videoUrl;
+                    loadingIndicator.style.display = 'flex';
+                    
+                    // コントロールパネルを非表示にする
+                    controlsPanel.classList.add('opacity-0');
+                    setTimeout(() => {
+                        controlsPanel.style.display = 'none';
+                    }, 500);
+                    
+                    videoElement.play().catch(e => {
+                        console.error("動画の再生に失敗しました:", e);
+                        alert("動画の再生に失敗しました。URLが正しいか、CORSポリシーが許可されているか確認してください。");
+                        controlsPanel.style.display = 'block';
+                        controlsPanel.classList.remove('opacity-0');
+                        loadingIndicator.style.display = 'none';
+                    });
+                } catch (e) {
+                     console.error("URLの処理中にエラーが発生しました:", e);
+                     alert("無効なURL形式の可能性があります。");
+                     loadingIndicator.style.display = 'none';
+                }
+            } else {
+                alert("動画URLを入力してください。");
+            }
+        });
+
+        videoElement.addEventListener('playing', () => {
+            loadingIndicator.style.display = 'none';
+            pauseButton.style.display = 'block';
+        });
+
+        videoElement.addEventListener('error', (e) => {
+            loadingIndicator.style.display = 'none';
+            controlsPanel.style.display = 'block';
+            controlsPanel.classList.remove('opacity-0');
+            alert('動画の読み込みに失敗しました。URLが正しいか、サーバーのCORS設定が許可されているか確認してください。');
+        });
+        
+        pauseButton.addEventListener('click', () => {
+            if (videoElement.paused) {
+                videoElement.play();
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            } else {
+                videoElement.pause();
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+            }
+        });
+
+
+        // --- 初期化とアニメーション開始 ---
+        init();
+        animate();
+    </script>
+</body>
+</html>
+
