@@ -166,19 +166,25 @@
                 return;
             }
             
-            // Mute video to comply with browser autoplay policies
             video.muted = true;
             video.src = videoUrl;
-            video.load(); // Explicitly load the new source
 
-            const playPromise = video.play();
+            // Define a one-time function to handle playing the video
+            const onCanPlay = () => {
+                video.removeEventListener('canplay', onCanPlay); // Clean up the listener
+                const playPromise = video.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.error("動画の再生に失敗しました:", error);
+                        showAlert('ブラウザのセキュリティ設定により、動画の再生を開始できませんでした。ページを再読み込みして、もう一度再生ボタンを押してください。');
+                    });
+                }
+            };
 
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.error("動画の再生に失敗しました:", error);
-                    showAlert('ブラウザのセキュリティ設定により、動画の再生を開始できませんでした。ページを再読み込みして、もう一度再生ボタンを押してください。');
-                });
-            }
+            // Listen for the 'canplay' event, which fires when the video is ready
+            video.addEventListener('canplay', onCanPlay);
+            
+            video.load(); // Start loading the video source
         }
         
         function onPointerStart(event) {
