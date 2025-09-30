@@ -69,16 +69,17 @@
             <div class="max-w-4xl mx-auto">
                 <label for="videoUrl" class="block text-sm font-medium text-gray-400 mb-2">360度動画のURL</label>
                 <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="text" id="videoUrl" class="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="https://example.com/video.mp4" value="https://storage.googleapis.com/gweb-vrview/examples/video/congo_2048.mp4">
+                    <input type="text" id="videoUrl" class="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="https://example.com/video.mp4" value="https://bitmovin-a.akamaihd.net/content/playhouse-vr/mp4s/102321_24125_120335_2000_0.mp4">
                     <button id="playButton" class="w-full sm:w-auto text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center">再生</button>
                 </div>
+                 <p class="text-xs text-gray-500 mt-2">注: ブラウザの制限により、動画は音声なしで再生されます。</p>
             </div>
         </div>
         <canvas id="video-canvas"></canvas>
     </div>
 
     <!-- Video element is hidden, used as a texture source -->
-    <video id="video" style="display:none" crossorigin="anonymous" playsinline webkit-playsinline loop muted></video>
+    <video id="video" style="display:none" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
 
     <!-- Modal for custom alerts -->
     <div id="custom-alert-container" class="hidden">
@@ -126,26 +127,22 @@
 
             // Sphere Geometry
             const geometry = new THREE.SphereGeometry(500, 60, 40);
-            // Invert the geometry on the x-axis so that all of the faces point inward
             geometry.scale(-1, 1, 1);
 
-            // Video Texture
             const texture = new THREE.VideoTexture(video);
             const material = new THREE.MeshBasicMaterial({ map: texture });
 
-            // Sphere Mesh
             sphere = new THREE.Mesh(geometry, material);
             scene.add(sphere);
 
-            // Renderer
             renderer = new THREE.WebGLRenderer({ canvas });
             renderer.setPixelRatio(window.devicePixelRatio);
             resizeCanvas();
 
-            // Event Listeners
             playButton.addEventListener('click', playVideo);
-            video.addEventListener('error', () => {
+            video.addEventListener('error', (e) => {
                  showAlert('動画の読み込みに失敗しました。URLが正しいか、サーバーのCORS設定が許可されているか確認してください。');
+                 console.error('Video Error:', e);
             });
 
             canvas.addEventListener('mousedown', onPointerStart);
@@ -168,11 +165,20 @@
                 showAlert('動画のURLを入力してください。');
                 return;
             }
+            
+            // Mute video to comply with browser autoplay policies
+            video.muted = true;
             video.src = videoUrl;
-            video.play().catch(e => {
-                console.error("動画の再生に失敗しました:", e);
-                // The video 'error' event will handle the user-facing message.
-            });
+            video.load(); // Explicitly load the new source
+
+            const playPromise = video.play();
+
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.error("動画の再生に失敗しました:", error);
+                    showAlert('ブラウザのセキュリティ設定により、動画の再生を開始できませんでした。ページを再読み込みして、もう一度再生ボタンを押してください。');
+                });
+            }
         }
         
         function onPointerStart(event) {
@@ -190,7 +196,7 @@
                 const clientY = event.clientY || event.touches[0].clientY;
                 lon = (onMouseDownPosition.x - clientX) * 0.2 + onMouseDownLon;
                 lat = (clientY - onMouseDownPosition.y) * 0.2 + onMouseDownLat;
-                lat = Math.max(-85, Math.min(85, lat)); // Clamp latitude
+                lat = Math.max(-85, Math.min(85, lat));
             }
         }
 
@@ -208,7 +214,6 @@
             const container = document.getElementById('player-container');
             const controls = document.getElementById('controls');
             const newWidth = container.clientWidth;
-            // Subtract controls height from the container's height
             const newHeight = container.clientHeight - controls.offsetHeight;
 
             camera.aspect = newWidth / newHeight;
@@ -237,3 +242,4 @@
     </script>
 </body>
 </html>
+
