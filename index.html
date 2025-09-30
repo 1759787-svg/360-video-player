@@ -47,6 +47,7 @@
             z-index: 100;
             text-align: center;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 90%;
         }
         #custom-alert-backdrop {
             position: fixed;
@@ -70,7 +71,7 @@
                 <label for="videoUrl" class="block text-sm font-medium text-gray-400 mb-2">360度動画のURL</label>
                 <div class="flex flex-col sm:flex-row gap-2">
                     <input type="text" id="videoUrl" class="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="https://example.com/video.mp4" value="https://bitmovin-a.akamaihd.net/content/playhouse-vr/mp4s/102321_24125_120335_2000_0.mp4">
-                    <button id="playButton" class="w-full sm:w-auto text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center">再生</button>
+                    <button id="playButton" class="w-full sm:w-auto text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center disabled:opacity-50">再生</button>
                 </div>
                  <p class="text-xs text-gray-500 mt-2">注: ブラウザの制限により、動画は音声なしで再生されます。</p>
             </div>
@@ -107,7 +108,6 @@
         let lat = 0, lon = 0;
         let phi = 0, theta = 0;
 
-        // Custom Alert Function
         function showAlert(message) {
             alertMessage.textContent = message;
             alertContainer.classList.remove('hidden');
@@ -118,14 +118,10 @@
         });
 
         function init() {
-            // Scene
             scene = new THREE.Scene();
-
-            // Camera
             camera = new THREE.PerspectiveCamera(75, canvas.offsetWidth / canvas.offsetHeight, 1, 1100);
             camera.target = new THREE.Vector3(0, 0, 0);
 
-            // Sphere Geometry
             const geometry = new THREE.SphereGeometry(500, 60, 40);
             geometry.scale(-1, 1, 1);
 
@@ -142,18 +138,17 @@
             playButton.addEventListener('click', playVideo);
             video.addEventListener('error', (e) => {
                  showAlert('動画の読み込みに失敗しました。URLが正しいか、サーバーのCORS設定が許可されているか確認してください。');
-                 console.error('Video Error:', e);
+                 playButton.textContent = '再生';
+                 playButton.disabled = false;
             });
 
             canvas.addEventListener('mousedown', onPointerStart);
             canvas.addEventListener('mousemove', onPointerMove);
             canvas.addEventListener('mouseup', onPointerEnd);
             canvas.addEventListener('wheel', onDocumentMouseWheel);
-            
             canvas.addEventListener('touchstart', onPointerStart, { passive: false });
             canvas.addEventListener('touchmove', onPointerMove, { passive: false });
             canvas.addEventListener('touchend', onPointerEnd);
-
             window.addEventListener('resize', resizeCanvas);
 
             animate();
@@ -166,25 +161,30 @@
                 return;
             }
             
+            playButton.textContent = '読込中...';
+            playButton.disabled = true;
+
             video.muted = true;
             video.src = videoUrl;
+            video.load();
 
-            // Define a one-time function to handle playing the video
-            const onCanPlay = () => {
-                video.removeEventListener('canplay', onCanPlay); // Clean up the listener
-                const playPromise = video.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.error("動画の再生に失敗しました:", error);
-                        showAlert('ブラウザのセキュリティ設定により、動画の再生を開始できませんでした。ページを再読み込みして、もう一度再生ボタンを押してください。');
-                    });
-                }
-            };
+            const playPromise = video.play();
 
-            // Listen for the 'canplay' event, which fires when the video is ready
-            video.addEventListener('canplay', onCanPlay);
-            
-            video.load(); // Start loading the video source
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    console.log("動画の再生を開始しました。");
+                    playButton.textContent = '再生';
+                    playButton.disabled = false;
+                }).catch(error => {
+                    console.error("動画の再生に失敗しました:", error);
+                    showAlert('ブラウザのセキュリティ制限により動画を再生できませんでした。もう一度「再生」ボタンを押してみてください。');
+                    playButton.textContent = '再生';
+                    playButton.disabled = false;
+                });
+            } else {
+                 playButton.textContent = '再生';
+                 playButton.disabled = false;
+            }
         }
         
         function onPointerStart(event) {
@@ -221,7 +221,6 @@
             const controls = document.getElementById('controls');
             const newWidth = container.clientWidth;
             const newHeight = container.clientHeight - controls.offsetHeight;
-
             camera.aspect = newWidth / newHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(newWidth, newHeight);
@@ -235,11 +234,9 @@
         function render() {
             phi = THREE.MathUtils.degToRad(90 - lat);
             theta = THREE.MathUtils.degToRad(lon);
-
             camera.target.x = 500 * Math.sin(phi) * Math.cos(theta);
             camera.target.y = 500 * Math.cos(phi);
             camera.target.z = 500 * Math.sin(phi) * Math.sin(theta);
-
             camera.lookAt(camera.target);
             renderer.render(scene, camera);
         }
